@@ -11,7 +11,9 @@ function print_help {
     echo "  -d <scan_directory> - directory to scan for log files"
     echo "  -l <line_threshold> - threshold of lines in log file"
     echo "  -b <backup_directory> - directory to backup log files"
-    echo "  -h display this help message"
+    echo "  -a - advanced scan mode (deep scan)"
+    echo "  -r - remove original log file after backup"
+    echo "  -h - display this help message"
     exit 1
 }
 
@@ -23,8 +25,12 @@ function create_backup_directory {
 }
 
 function validate_input_params {
-    if [ ! -d $1 ]; then
-        echo "Error: Directory '$SCAN_DIRECTORY' does not exist"
+    if [ ! -d $1 ] && [ ! -f $1 ]; then
+        TYPE="File"
+        if [ -f $1 ]; then
+            TYPE="Directory"
+        fi
+        echo "Error: $TYPE '$SCAN_DIRECTORY' does not exist"
         exit 1
     fi
 
@@ -39,26 +45,54 @@ function validate_input_params {
     fi
 }
 
-while getopts d:l:b:h flag; do
+while getopts d:l:b:hao flag; do
     case "${flag}" in
     d) SCAN_DIRECTORY=${OPTARG} ;;
     l) LINE_THRESHOLD=${OPTARG} ;;
     b) BACKUP_DIRECTORY=${OPTARG} ;;
+    a) DEEP_SCAN=true ;;
+    r) REMOVE_ORIGINAL=true ;;
     h) print_help ;;
     esac
 done
 
 validate_input_params $SCAN_DIRECTORY $BACKUP_DIRECTORY $LINE_THRESHOLD
 
-FILES=($(find "$SCAN_DIRECTORY" -type f -iname "*.log" 2>/dev/null))
-
-echo "$FILES"
+if [ -f "$SCAN_DIRECTORY" ]; then
+    FILES=("$SCAN_DIRECTORY")
+elif [ "$DEEP_SCAN" = true ]; then
+    FILES=($(find "$SCAN_DIRECTORY" -type f -iname "*.log" -print0 2>/dev/null | xargs -0 -n 1 echo | uniq))
+else
+    FILES=($(find "$SCAN_DIRECTORY" -maxdepth 1 -type f -iname "*.log" -print0 2>/dev/null | xargs -0 -n 1 echo | uniq))
+fi
 
 if [ ${#FILES[@]} -eq 0 ]; then
     echo "No log files found in $SCAN_DIRECTORY"
     exit 1
 fi
-#
-#for file in "${FILES[@]}"; do
-#    echo "Found log file: $file"
-#done
+
+for file in "${FILES[@]}"; do
+    mkdir -p "$TEMP_DIRECTORY" || {
+        echo "Failed to create temporary directory"
+        exit 1
+    }
+    LINE_COUNT=$(wc -l <"$file")
+    FILE_NAME=$(basename "$file" .log)
+    FILE_PATH=$(dirname "$file")
+    echo "Processing $file with $LINE_COUNT lines"
+    split --additional-suffix=.log -d -l $LINE_THRESHOLD "$file" "${TEMP_DIRECTORY}/${FILE_NAME}_part_" || {
+        echo "Failed to split $file"
+        exit 1
+    }
+    tar -czf "$BACKUP_DIRECTORY/${FILE_NAME}_$(date +%Y%m%d_%H%M%S).tar.gz" $TEMP_DIRECTORY/*.log || {
+        echo "Failed to create backup archive"
+        exit 1
+    }
+    mv "$TEMP_DIRECTORY" "$FILE_PATH/${FILE_NAME}_$(date +%Y%m%d_%H%M%S)" || {
+        echo "Failed to rename $file"
+        exit 1
+    }
+    if [ "$REMOVE_ORIGINAL" = true ]; then
+        rm "$file"
+    fi
+done
