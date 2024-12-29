@@ -1,4 +1,3 @@
-const markdown = `
 # Log Manager Script
 
 `log_manager.sh` is a Bash script for managing log files. It allows scanning a specified directory, splitting large log files into parts, creating backups, and optionally deleting original files.
@@ -94,4 +93,3 @@ This script is free to use and distribute. Use it at your own discretion and res
 
 ### Author
 An Engineer who loves keeping logs organized. 😄
-`;
